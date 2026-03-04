@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-import httpx
+import requests
 
 import config
 from db import SessionLocal, Trial, Document, get_or_create_trial, compute_file_hash
@@ -14,6 +14,10 @@ from db import SessionLocal, Trial, Document, get_or_create_trial, compute_file_
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://clinicaltrials.gov/api/v2"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json",
+}
 
 
 def search_trials(
@@ -23,21 +27,24 @@ def search_trials(
     format: str = "json",
 ) -> dict:
     """
-    Search clinicaltrials.gov for trials.
+    Search clinicaltrials.gov for trials using v2 API.
     
     Returns dict with trials_found, next_page_token, etc.
     """
+    # Build query
+    if conditions:
+        query_param = " ".join(conditions)
+    elif query:
+        query_param = query
+    else:
+        query_param = ""
+    
     params = {
-        "pageSize": min(limit, 100),  # API max is 100
-        "format": format,
+        "pageSize": min(limit, 100),
     }
     
-    if conditions:
-        # Build condition filter
-        cond_query = " ".join(conditions)
-        params["query.cond"] = cond_query
-    elif query:
-        params["query.term"] = query
+    if query_param:
+        params["query.cond"] = query_param
     
     # Get study fields we need
     params["fields"] = "NCTId,BriefTitle,OverallStatus,Condition,InterventionName,LeadSponsorName"
@@ -51,73 +58,71 @@ def search_trials(
         "trials": [],
     }
     
-    with httpx.Client(timeout=60.0) as client:
-        response = client.get(url, params=params)
-        response.raise_for_status()
+    response = requests.get(url, params=params, headers=HEADERS, timeout=60)
+    response.raise_for_status()
+    
+    data = response.json()
+    studies = data.get("studies", [])
+    
+    for study in studies:
+        protocol = study.get("protocolSection", {})
         
-        data = response.json()
-        studies = data.get("studies", [])
+        # Extract fields from v2 API format
+        identification = protocol.get("identificationModule", {})
+        nct_id = identification.get("nctId")
+        title = identification.get("briefTitle", "Untitled")
+        sponsor = identification.get("leadSponsorName")
         
-        for study in studies:
-            protocol = study.get("protocolSection", {})
+        status_module = protocol.get("statusModule", {})
+        status = status_module.get("overallStatus", "UNKNOWN")
+        
+        conditions_list = protocol.get("conditionsModule", {}).get("conditions", [])
+        interventions = protocol.get("armsInterventionsModule", {}).get("interventions", [])
+        
+        if not nct_id:
+            continue
+        
+        results["trials_found"] += 1
+        
+        # Save trial to DB
+        db = SessionLocal()
+        try:
+            trial = get_or_create_trial(
+                db,
+                nct_id=nct_id,
+                title=title,
+                status=status,
+                conditions=json.dumps(conditions_list),
+                interventions=json.dumps([i.get("name") for i in interventions]),
+                sponsor=sponsor,
+            )
+            results["updated"] += 1
             
-            # Extract fields
-            identification = protocol.get("identificationModule", {})
-            nct_id = identification.get("nctId")
-            title = identification.get("briefTitle", "Untitled")
-            sponsor = identification.get("leadSponsor", {}).get("name")
+            # Now try to find PDFs for this trial
+            pdf_count = download_pdfs_for_trial(db, nct_id)
+            results["new_pdfs"] += pdf_count
             
-            status_module = protocol.get("statusModule", {})
-            status = status_module.get("overallStatus", "UNKNOWN")
-            
-            conditions_list = protocol.get("conditionsModule", {}).get("conditions", [])
-            interventions = protocol.get("armsInterventionsModule", {}).get("interventions", [])
-            
-            if not nct_id:
-                continue
-            
-            results["trials_found"] += 1
-            
-            # Save trial to DB
-            db = SessionLocal()
-            try:
-                trial = get_or_create_trial(
-                    db,
-                    nct_id=nct_id,
-                    title=title,
-                    status=status,
-                    conditions=json.dumps(conditions_list),
-                    interventions=json.dumps([i.get("name") for i in interventions]),
-                    sponsor=sponsor,
-                )
-                results["updated"] += 1
-                
-                # Now try to find PDFs for this trial
-                pdf_count = download_pdfs_for_trial(client, db, nct_id)
-                results["new_pdfs"] += pdf_count
-                
-            except Exception as e:
-                logger.error(f"Error processing {nct_id}: {e}")
-            finally:
-                db.close()
+        except Exception as e:
+            logger.error(f"Error processing {nct_id}: {e}")
+        finally:
+            db.close()
     
     return results
 
 
-def download_pdfs_for_trial(client: httpx.Client, db, nct_id: str) -> int:
+def download_pdfs_for_trial(db, nct_id: str) -> int:
     """
     Try to download PDF(s) for a given trial.
     Clinicaltrials.gov has PDFs in the results or documents sections.
     """
-    # Try to get document info from the API
+    # Use v2 API to get study details
     url = f"{BASE_URL}/studies/{nct_id}"
     params = {
-        "format": "json",
-        "fields": "DocumentSection",
+        "fields": "NCTId,DocumentSection",
     }
     
     try:
-        response = client.get(url, params=params)
+        response = requests.get(url, params=params, headers=HEADERS, timeout=30)
         if response.status_code != 200:
             return 0
         
@@ -126,7 +131,7 @@ def download_pdfs_for_trial(client: httpx.Client, db, nct_id: str) -> int:
         
         downloaded = 0
         
-        # Check for documents
+        # Check for documents (in DocumentSection)
         docs_module = protocol.get("documentSection", {})
         if docs_module:
             for doc in docs_module.get("documents", []):
@@ -136,10 +141,8 @@ def download_pdfs_for_trial(client: httpx.Client, db, nct_id: str) -> int:
                     if download_pdf(db, nct_id, doc_type, pdf_url):
                         downloaded += 1
         
-        # Also check for results (they often have PDFs)
-        # Results often link to PDFs in various places
-        # For now, just mark we found the trial - actual PDF download
-        # might require different endpoints or scraping
+        # Also check results section - results may have links to PDFs
+        # For now, skip - would need more complex scraping
         pass
         
         return downloaded
@@ -155,7 +158,7 @@ def download_pdf(db, nct_id: str, doc_type: str, url: str) -> bool:
     Returns True if downloaded successfully.
     """
     try:
-        response = httpx.get(url, timeout=30.0)
+        response = requests.get(url, timeout=30, headers=HEADERS)
         if response.status_code != 200:
             return False
         
