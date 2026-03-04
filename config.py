@@ -1,0 +1,32 @@
+"""
+Configuration management - loads from .env file.
+"""
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file
+load_dotenv()
+
+# Base paths
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / os.getenv("DATA_DIR", "./data")
+DATABASE_URL = os.getenv("DATABASE_URL", "confydex.db")
+
+# Ensure data directory exists
+DATA_DIR.mkdir(exist_ok=True)
+
+# Embedding config
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")
+
+# Search weights
+KEYWORD_WEIGHT = float(os.getenv("KEYWORD_WEIGHT", "0.5"))
+SEMANTIC_WEIGHT = float(os.getenv("SEMANTIC_WEIGHT", "0.5"))
+
+# API config
+API_HOST = os.getenv("API_HOST", "0.0.0.0")
+API_PORT = int(os.getenv("API_PORT", "8000"))
+
+# Frontend config
+FRONTEND_PORT = int(os.getenv("FRONTEND_PORT", "5173"))

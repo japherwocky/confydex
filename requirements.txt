@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+httpx
+sqlalchemy
+python-dotenv
+tiktoken
+
+# PDF processing
+docling
+
+# Embeddings
+sentence-transformers
+
+# Optional: for better SQLite FTS support
+# sqlite-vector  # not needed if storing embeddings as blob
