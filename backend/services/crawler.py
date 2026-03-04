@@ -1,9 +1,8 @@
 """
-Clinicaltrials.gov API crawler.
+Clinicaltrials.gov API crawler - stores structured text as documents.
 """
 import json
 import logging
-from pathlib import Path
 from typing import Optional
 
 import requests
@@ -24,12 +23,9 @@ def search_trials(
     limit: int = 10,
     conditions: Optional[list] = None,
     query: str = "",
-    format: str = "json",
 ) -> dict:
     """
-    Search clinicaltrials.gov for trials using v2 API.
-    
-    Returns dict with trials_found, next_page_token, etc.
+    Search clinicaltrials.gov for trials and store structured text as documents.
     """
     # Build query
     if conditions:
@@ -46,16 +42,12 @@ def search_trials(
     if query_param:
         params["query.cond"] = query_param
     
-    # Get study fields we need
-    params["fields"] = "NCTId,BriefTitle,OverallStatus,Condition,InterventionName,LeadSponsorName"
-    
     url = f"{BASE_URL}/studies"
     
     results = {
         "trials_found": 0,
-        "new_pdfs": 0,
+        "new_documents": 0,
         "updated": 0,
-        "trials": [],
     }
     
     response = requests.get(url, params=params, headers=HEADERS, timeout=60)
@@ -67,7 +59,7 @@ def search_trials(
     for study in studies:
         protocol = study.get("protocolSection", {})
         
-        # Extract fields from v2 API format
+        # Extract fields
         identification = protocol.get("identificationModule", {})
         nct_id = identification.get("nctId")
         title = identification.get("briefTitle", "Untitled")
@@ -78,6 +70,8 @@ def search_trials(
         
         conditions_list = protocol.get("conditionsModule", {}).get("conditions", [])
         interventions = protocol.get("armsInterventionsModule", {}).get("interventions", [])
+        
+        description = protocol.get("descriptionModule", {}).get("briefSummary", "")
         
         if not nct_id:
             continue
@@ -98,10 +92,59 @@ def search_trials(
             )
             results["updated"] += 1
             
-            # Now try to find PDFs for this trial
-            pdf_count = download_pdfs_for_trial(db, nct_id)
-            results["new_pdfs"] += pdf_count
+            # Create document from structured text
+            # Combine all text fields into one document
+            text_parts = []
             
+            if title:
+                text_parts.append(f"Title: {title}")
+            if description:
+                text_parts.append(f"Summary: {description}")
+            if conditions_list:
+                text_parts.append(f"Conditions: {', '.join(conditions_list)}")
+            if interventions:
+                text_parts.append(f"Interventions: {', '.join([i.get('name', '') for i in interventions])}")
+            
+            # Add outcomes if available
+            outcomes_module = protocol.get("outcomesModule", {})
+            if outcomes_module:
+                primary = outcomes_module.get("primaryOutcomes", [])
+                if primary:
+                    text_parts.append("Primary Outcomes: " + ", ".join([o.get("measure", "") for o in primary]))
+                secondary = outcomes_module.get("secondaryOutcomes", [])
+                if secondary:
+                    text_parts.append("Secondary Outcomes: " + ", ".join([o.get("measure", "") for o in secondary]))
+            
+            full_text = "\n\n".join(text_parts)
+            
+            # Check if document already exists for this trial
+            existing_doc = db.query(Document).filter(
+                Document.trial_id == trial.id,
+                Document.doc_type == "structured"
+            ).first()
+            
+            if not existing_doc:
+                # Create fake file_hash for deduplication tracking
+                file_hash = f"{nct_id}_structured"
+                
+                doc = Document(
+                    trial_id=trial.id,
+                    nct_id=nct_id,
+                    doc_type="structured",
+                    file_path=f"api://{nct_id}",
+                    file_hash=file_hash,
+                    raw_text=full_text,
+                )
+                db.add(doc)
+                db.commit()
+                results["new_documents"] += 1
+                logger.info(f"Created document for {nct_id}")
+            else:
+                # Update existing
+                existing_doc.raw_text = full_text
+                db.commit()
+                logger.info(f"Updated document for {nct_id}")
+                
         except Exception as e:
             logger.error(f"Error processing {nct_id}: {e}")
         finally:
@@ -110,111 +153,8 @@ def search_trials(
     return results
 
 
-def download_pdfs_for_trial(db, nct_id: str) -> int:
-    """
-    Try to download PDF(s) for a given trial.
-    Clinicaltrials.gov has PDFs in the results or documents sections.
-    """
-    # Use v2 API to get study details
-    url = f"{BASE_URL}/studies/{nct_id}"
-    params = {
-        "fields": "NCTId,DocumentSection",
-    }
-    
-    try:
-        response = requests.get(url, params=params, headers=HEADERS, timeout=30)
-        if response.status_code != 200:
-            return 0
-        
-        data = response.json()
-        protocol = data.get("protocolSection", {})
-        
-        downloaded = 0
-        
-        # Check for documents (in DocumentSection)
-        docs_module = protocol.get("documentSection", {})
-        if docs_module:
-            for doc in docs_module.get("documents", []):
-                doc_type = doc.get("type", "unknown")
-                if doc.get("url"):
-                    pdf_url = doc["url"]
-                    if download_pdf(db, nct_id, doc_type, pdf_url):
-                        downloaded += 1
-        
-        # Also check results section - results may have links to PDFs
-        # For now, skip - would need more complex scraping
-        pass
-        
-        return downloaded
-        
-    except Exception as e:
-        logger.debug(f"No PDFs found for {nct_id}: {e}")
-        return 0
-
-
-def download_pdf(db, nct_id: str, doc_type: str, url: str) -> bool:
-    """
-    Download a PDF and save to data directory.
-    Returns True if downloaded successfully.
-    """
-    try:
-        response = requests.get(url, timeout=30, headers=HEADERS)
-        if response.status_code != 200:
-            return False
-        
-        # Determine filename
-        ext = ".pdf"
-        filename = f"{nct_id}_{doc_type}{ext}"
-        filepath = config.DATA_DIR / filename
-        
-        # Check if already exists
-        if filepath.exists():
-            # Verify hash
-            file_hash = compute_file_hash(filepath)
-            existing = db.query(Document).filter(Document.file_hash == file_hash).first()
-            if existing:
-                logger.debug(f"PDF already exists: {filename}")
-                return False
-        
-        # Save file
-        filepath.write_bytes(response.content)
-        
-        # Compute hash and create DB record
-        file_hash = compute_file_hash(filepath)
-        
-        # Get trial
-        trial = db.query(Trial).filter(Trial.nct_id == nct_id).first()
-        if not trial:
-            return False
-        
-        # Create document record
-        doc = Document(
-            trial_id=trial.id,
-            nct_id=nct_id,
-            doc_type=doc_type,
-            file_path=str(filepath),
-            file_hash=file_hash,
-        )
-        
-        db.add(doc)
-        db.commit()
-        
-        logger.info(f"Downloaded: {filename}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error downloading PDF for {nct_id}: {e}")
-        return False
-
-
 def crawl_trials(limit: int = 10, conditions: Optional[list] = None) -> dict:
     """
     Main crawl function - called from CLI.
     """
-    return search_trials(limit=limit, conditions=conditions)
-
-
-# Also support async for future use
-async def crawl_trials_async(limit: int = 10, conditions: Optional[list] = None) -> dict:
-    """Async version using httpx."""
     return search_trials(limit=limit, conditions=conditions)
