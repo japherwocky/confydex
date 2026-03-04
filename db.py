@@ -66,7 +66,6 @@ class Document(Base):
 
     __table_args__ = (
         Index("ix_documents_trial_id", "trial_id"),
-        Index("ix_documents_nct_id", "nct_id"),
     )
 
 
