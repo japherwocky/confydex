@@ -137,11 +137,10 @@ def download_pdfs_for_trial(client: httpx.Client, db, nct_id: str) -> int:
                         downloaded += 1
         
         # Also check for results (they often have PDFs)
-        results_module = protocol.get("resultsSection", {})
-        if results_module:
-            # Results often link to PDFs in various places
-            # For now, just mark we found the trial - actual PDF download 
-            # might require different endpoints or scraping
+        # Results often link to PDFs in various places
+        # For now, just mark we found the trial - actual PDF download
+        # might require different endpoints or scraping
+        pass
         
         return downloaded
         
