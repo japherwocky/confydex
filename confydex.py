@@ -114,9 +114,28 @@ def cmd_serve_api(args):
 
 def cmd_serve(args):
     """Serve full stack (frontend + API)."""
-    # For now, just run the API - frontend will be separate
-    # In production, would use a proxy or serve static files
-    print("Note: Frontend not yet set up. Running API only.")
+    import threading
+    import time
+    
+    # Start frontend dev server in background thread
+    frontend_dir = Path(__file__).parent / "frontend"
+    
+    def run_frontend():
+        subprocess.run(
+            [sys.executable, "-m", "vite"],
+            cwd=str(frontend_dir),
+            env={**os.environ, "PYTHONPATH": str(Path(__file__).parent)},
+        )
+    
+    frontend_thread = threading.Thread(target=run_frontend, daemon=True)
+    frontend_thread.start()
+    
+    print(f"Frontend dev server starting at http://localhost:{config.FRONTEND_PORT}")
+    
+    # Wait a moment for frontend to start
+    time.sleep(2)
+    
+    # Then run the API
     cmd_serve_api(args)
 
 
