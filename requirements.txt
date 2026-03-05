@@ -4,6 +4,7 @@ httpx
 sqlalchemy
 python-dotenv
 tiktoken
+python-multipart
 
 # PDF/DOCX processing
 pypdf
