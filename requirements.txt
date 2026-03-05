@@ -5,11 +5,13 @@ sqlalchemy
 python-dotenv
 tiktoken
 
-# PDF processing
-docling
+# PDF/DOCX processing
+pypdf
+python-docx
 
-# Embeddings
+# LLM clients
+openai
+anthropic
+
+# Embeddings (for future use)
 sentence-transformers
-
-# Optional: for better SQLite FTS support
-# sqlite-vector  # not needed if storing embeddings as blob

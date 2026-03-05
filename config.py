@@ -30,3 +30,13 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 
 # Frontend config
 FRONTEND_PORT = int(os.getenv("FRONTEND_PORT", "5173"))
+
+# Upload directory
+UPLOAD_DIR = BASE_DIR / os.getenv("UPLOAD_DIR", "./uploads")
+
+# LLM config
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")

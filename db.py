@@ -69,6 +69,52 @@ class Document(Base):
     )
 
 
+class Protocol(Base):
+    """Uploaded clinical trial protocol."""
+    __tablename__ = "protocols"
+
+    id = Column(Integer, primary_key=True)
+    filename = Column(Text, nullable=False)
+    file_path = Column(Text, nullable=False)
+    file_hash = Column(String(64))  # SHA256 for deduplication
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    section_3_text = Column(Text)  # Extracted Section 3 content
+
+    reviews = relationship("Review", back_populates="protocol")
+
+
+class Review(Base):
+    """Regulatory review report for a protocol."""
+    __tablename__ = "reviews"
+
+    id = Column(Integer, primary_key=True)
+    protocol_id = Column(Integer, ForeignKey("protocols.id"), nullable=False)
+    overall_rating = Column(String(20))  # High / Medium / Low
+    recommendation = Column(Text)  # Approvable / Revisions needed / Major concerns
+    estimand_score = Column(Integer)  # X/4 ICH E9(R1) attributes
+    endpoint = Column(String(50))  # ORR / PFS / OS / Other
+    report_json = Column(Text)  # Full structured report (JSON)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    protocol = relationship("Protocol", back_populates="reviews")
+
+    __table_args__ = (
+        Index("ix_reviews_protocol_id", "protocol_id"),
+    )
+
+
+class ReferenceDoc(Base):
+    """Reference regulatory documents for RAG."""
+    __tablename__ = "reference_docs"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(Text, nullable=False)
+    doc_type = Column(String(50))  # guidance / approval_package / competitor
+    url = Column(Text)
+    content_text = Column(Text)  # Extracted text for RAG
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db():
     """Create all tables."""
     Base.metadata.create_all(bind=engine)
@@ -142,3 +188,36 @@ def embedding_to_list(embedding: bytes) -> list:
 def embedding_to_bytes(embedding: list) -> bytes:
     """Convert list of floats to binary for storage."""
     return json.dumps(embedding).encode("utf-8")
+
+
+def protocol_to_dict(protocol: Protocol) -> dict:
+    """Convert protocol to dictionary."""
+    return {
+        "id": protocol.id,
+        "filename": protocol.filename,
+        "file_path": protocol.file_path,
+        "file_hash": protocol.file_hash,
+        "uploaded_at": protocol.uploaded_at.isoformat() if protocol.uploaded_at else None,
+        "section_3_length": len(protocol.section_3_text) if protocol.section_3_text else 0,
+    }
+
+
+def review_to_dict(review: Review) -> dict:
+    """Convert review to dictionary."""
+    return {
+        "id": review.id,
+        "protocol_id": review.protocol_id,
+        "overall_rating": review.overall_rating,
+        "recommendation": review.recommendation,
+        "estimand_score": review.estimand_score,
+        "endpoint": review.endpoint,
+        "created_at": review.created_at.isoformat() if review.created_at else None,
+    }
+
+
+def review_to_full_dict(review: Review) -> dict:
+    """Convert review to full dictionary with report."""
+    result = review_to_dict(review)
+    if review.report_json:
+        result["report"] = json.loads(review.report_json)
+    return result
