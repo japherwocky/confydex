@@ -5,6 +5,7 @@ import json
 from typing import Optional, Dict, Any
 
 import openai
+from openai import OpenAI
 from anthropic import Anthropic
 
 import config
@@ -66,6 +67,13 @@ class LLMAnalyzer:
         elif provider == "anthropic":
             self.model = model or config.ANTHROPIC_MODEL
             self.anthropic = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        elif provider == "opencode-go":
+            # OpenCode Go uses OpenAI-compatible API for GLM-5 and Kimi K2.5
+            self.model = model or config.OPENCODE_GO_MODEL
+            self.opencode_client = OpenAI(
+                base_url="https://opencode.ai/zen/go/v1",
+                api_key=config.OPENCODE_GO_API_KEY
+            )
         else:
             raise ValueError(f"Unknown provider: {provider}")
     
@@ -130,22 +138,44 @@ Provide your analysis in the following JSON format (include ALL fields):
 
 IMPORTANT: Return ONLY valid JSON, no additional text."""
 
-        if self.provider == "openai":
+        if self.provider in ("openai", "opencode-go"):
             return self._analyze_openai(user_prompt)
-        else:
+        elif self.provider == "anthropic":
             return self._analyze_anthropic(user_prompt)
+        else:
+            raise ValueError(f"Unknown provider: {self.provider}")
     
     def _analyze_openai(self, user_prompt: str) -> Dict[str, Any]:
-        """Analyze using OpenAI."""
-        response = openai.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.2,
-            response_format={"type": "json_object"}
-        )
+        """Analyze using OpenAI or OpenCode Go."""
+        if self.provider == "opencode-go":
+            response = self.opencode_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
+        else:
+            response = openai.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
+        
+        content = response.choices[0].message.content
+        return json.loads(content)
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
         
         content = response.choices[0].message.content
         return json.loads(content)

@@ -36,7 +36,15 @@ UPLOAD_DIR = BASE_DIR / os.getenv("UPLOAD_DIR", "./uploads")
 
 # LLM config
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
+
+# OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+
+# Anthropic
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+
+# OpenCode Go
+OPENCODE_GO_API_KEY = os.getenv("OPENCODE_GO_API_KEY", "")
+OPENCODE_GO_MODEL = os.getenv("OPENCODE_GO_MODEL", "glm-5")  # glm-5, kimi-k2.5, or minimax-m2.5
