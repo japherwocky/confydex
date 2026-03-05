@@ -78,7 +78,6 @@ class Protocol(Base):
     file_path = Column(Text, nullable=False)
     file_hash = Column(String(64))  # SHA256 for deduplication
     uploaded_at = Column(DateTime, default=datetime.utcnow)
-    section_3_text = Column(Text)  # Extracted Section 3 content
 
     reviews = relationship("Review", back_populates="protocol")
 

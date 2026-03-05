@@ -78,8 +78,7 @@ export async function healthCheck(): Promise<{ status: string }> {
 export interface UploadResponse {
   protocol_id: number
   filename: string
-  section_3_extracted: boolean
-  section_3_length: number
+  file_size: number
 }
 
 export interface ReviewReport {

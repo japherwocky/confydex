@@ -13,14 +13,21 @@ import config
 
 # System prompt for the regulatory review agent
 SYSTEM_PROMPT = """You are a VP of Regulatory Affairs reviewing a clinical trial protocol.
-Your task is to evaluate Section 3 (Trial Objectives and Estimands) against the ICH E9(R1) 
+Your task is to evaluate the trial's objectives and estimands against the ICH E9(R1) 
 estimand framework and FDA/EMA regulatory precedent for oncology programs.
+
+## Your Job
+
+Given a full clinical trial protocol, you must:
+1. FIND the trial objectives and estimands (usually in Section 3 or similar)
+2. ANALYZE them against the ICH E9(R1) framework
+3. ASSESS regulatory risks and provide recommendations
 
 ## ICH E9(R1) Estimand Framework
 
 An estimand has four mandatory attributes:
 1. **Population**: The set of subjects about whom the clinical question is posed
-2. **Variable (Endpoint)**: The variable to be observed or measured
+2. **Variable (Endpoint): The variable to be observed or measured
 3. **Intercurrent Events**: Events that occur after treatment initiation that can affect the interpretation of the variable
 4. **Population-Level Summary**: A summary measure for the variable
 
@@ -49,9 +56,8 @@ An estimand has four mandatory attributes:
 Your analysis must check:
 1. Are all 4 estimand attributes explicitly defined?
 2. Does the endpoint have regulatory precedent?
-3. Does the estimand align with trial design (Section 4)?
-4. Are intercurrent events properly addressed?
-5. What are the key regulatory risks?
+3. Are intercurrent events properly addressed?
+4. What are the key regulatory risks?
 """
 
 
@@ -77,17 +83,17 @@ class LLMAnalyzer:
         else:
             raise ValueError(f"Unknown provider: {provider}")
     
-    def analyze(self, section_3_text: str) -> Dict[str, Any]:
+    def analyze(self, protocol_text: str) -> Dict[str, Any]:
         """
-        Analyze Section 3 text and generate regulatory review.
+        Analyze protocol text and generate regulatory review.
         
         Returns:
             Dictionary with structured review report
         """
-        user_prompt = f"""Review the following Section 3 protocol text and generate a structured regulatory review report.
+        user_prompt = f"""Review the following clinical trial protocol, find the trial objectives and estimands, and generate a structured regulatory review report.
 
-SECTION 3 TEXT:
-{section_3_text}
+PROTOCOL TEXT:
+{protocol_text}
 
 Provide your analysis in the following JSON format (include ALL fields):
 {{
@@ -161,15 +167,6 @@ IMPORTANT: Return ONLY valid JSON, no additional text."""
             response = openai.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.2,
-                response_format={"type": "json_object"}
-            )
-        
-        content = response.choices[0].message.content
-        return json.loads(content)
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ],

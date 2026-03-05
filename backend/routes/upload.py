@@ -1,7 +1,6 @@
 """
 Upload API routes - handle protocol file uploads.
 """
-import json
 import shutil
 from pathlib import Path
 
@@ -10,7 +9,6 @@ from pydantic import BaseModel
 
 import config
 from db import SessionLocal, Protocol, compute_file_hash
-from backend.services.file_parser import get_parser
 
 
 router = APIRouter()
@@ -19,8 +17,7 @@ router = APIRouter()
 class UploadResponse(BaseModel):
     protocol_id: int
     filename: str
-    section_3_extracted: bool
-    section_3_length: int
+    file_size: int
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -51,29 +48,22 @@ async def upload_protocol(file: UploadFile = File(...)):
         file_path = upload_dir / f"{stem}_{counter}{suffix}"
         counter += 1
     
+    # Save to get file size
     with file_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+    
+    file_size = file_path.stat().st_size
     
     # Compute hash for deduplication
     file_hash = compute_file_hash(file_path)
     
-    # Extract Section 3
-    parser = get_parser()
-    try:
-        section_3_text, was_found = parser.parse_and_extract(file_path)
-    except Exception as e:
-        # If parsing fails, still save the file but mark section as not found
-        section_3_text = ""
-        was_found = False
-    
-    # Save to database
+    # Save metadata to database
     db = SessionLocal()
     try:
         protocol = Protocol(
             filename=file_path.name,
             file_path=str(file_path),
-            file_hash=file_hash,
-            section_3_text=section_3_text
+            file_hash=file_hash
         )
         db.add(protocol)
         db.commit()
@@ -82,8 +72,7 @@ async def upload_protocol(file: UploadFile = File(...)):
         return UploadResponse(
             protocol_id=protocol.id,
             filename=protocol.filename,
-            section_3_extracted=was_found,
-            section_3_length=len(section_3_text) if section_3_text else 0
+            file_size=file_size
         )
     except Exception as e:
         db.rollback()
