@@ -1,49 +1,52 @@
-# Confydex - Clinical Trial Document Search
+# Confydex - AI-Powered Regulatory Review of Protocol Section 3
 
 ## Overview
 
 **Confydex** is a proof-of-concept web application that:
-1. Crawls clinicaltrials.gov for PDF documents
-2. Ingests and extracts text from those PDFs using docling
-3. Generates vector embeddings for semantic search
-4. Provides a React frontend for searching indexed documents
+1. Accepts uploaded clinical trial protocols (PDF/DOCX)
+2. Extracts Section 3 (Trial Objectives and Estimands)
+3. Analyzes against ICH E9(R1) framework using LLM
+4. Generates structured regulatory review report with risk ratings
+5. Compares against competitor programs (KRAS G12C/G12D landscape)
 
 ## Goals
 
-- Demonstrate hybrid search (keyword + semantic/vector-based ranking)
-- Evaluate docling for PDF parsing
-- Keep architecture simple: SQLite for all storage, local file storage for PDFs
-- Support incremental crawling and re-indexing
+- Evaluate whether primary estimand is properly defined per ICH E9(R1)
+- Assess endpoint regulatory precedent for oncology indications
+- Compare design to competitor KRAS programs (sotorasib, adagrasib, etc.)
+- Produce structured output recognizable by regulatory professionals
+- End-to-end demo in under 60 seconds
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     React Frontend (Vite)                      │
-│   Search bar, filters, results list, document preview          │
+│                     React Frontend (Vite)                        │
+│   File upload, review report display, competitive analysis       │
 └─────────────────────────────┬───────────────────────────────────┘
-                              │ HTTP
+                               │ HTTP
 ┌─────────────────────────────▼───────────────────────────────────┐
-│                      FastAPI Backend                           │
-│  /api/search    - Search documents                             │
-│  /api/docs/{id} - Get document details / text                 │
-│  /api/crawl     - Trigger a new crawl                         │
-│  /api/stats     - Index statistics                             │
+│                      FastAPI Backend                             │
+│  /api/upload   - Upload protocol                                │
+│  /api/review   - Generate regulatory review                     │
+│  /api/reports  - List historical reviews                        │
+│  /api/health   - Health check                                    │
 └─────────────────────────────┬───────────────────────────────────┘
-                              │
-         ┌────────────────────┼────────────────────┐
-         ▼                    ▼                    ▼
+                               │
+          ┌────────────────────┼────────────────────┐
+          ▼                    ▼                    ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   Crawler       │  │  PDF Ingestion │  │  Embeddings    │
-│   (httpx +      │  │  (docling)     │  │  (sentence-    │
-│    clinical-    │  │  → SQLite      │  │   transformers)│
-│    trials.gov)  │  │                │  │  → SQLite      │
+│  File Handler   │  │  LLM Analyzer   │  │  Reference      │
+│  (PDF/DOCX)     │  │  (OpenAI/       │  │  Documents      │
+│  → Section 3    │  │   Anthropic)    │  │  (Regulatory    │
+│    extraction   │  │  → ICH E9(R1)   │  │    precedents)  │
+│                 │  │    analysis     │  │                 │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
+          │                    │                    │
+          ▼                    ▼                    ▼
 ┌───────────────────────────────────────────────────────────────┐
-│                    /data/ directory                           │
-│    Raw PDFs stored by NCT ID (e.g., NCT00000001.pdf)        │
+│                    SQLite Database                             │
+│    protocols | reviews | reference_docs                       │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -53,61 +56,54 @@
 # Initialize database
 python confydex.py init
 
-# Crawl clinicaltrials.gov for PDFs
-python confydex.py crawl --limit 10        # First 10 trials
-python confydex.py crawl                   # All trials (or use --limit)
+# Upload and analyze a protocol
+python confydex.py review --file protocol.pdf
+python confydex.py review --file protocol.docx
 
-# Ingest PDFs: extract text with docling, store in SQLite
-python confydex.py ingest                  # Process all PDFs in /data/
-python confydex.py ingest --nct-id NCT00001 # Process specific trial
+# List stored reviews
+python confydex.py reports
 
-# Generate vector embeddings
-python confydex.py embed                   # Generate for all documents
-python confydex.py embed --force           # Regenerate even if exists
+# View specific review
+python confydex.py report --id <review_id>
 
 # Serve the application
-python confydex.py serve-api                # FastAPI backend only (port 8000)
-python confydex.py serve                    # Full stack (frontend + API)
-
-# Development
-python confydex.py status                   # Show index stats
+python confydex.py serve-api              # FastAPI backend only (port 8000)
+python confydex.py serve                  # Full stack (frontend + API)
 ```
 
 ## Database Schema (SQLite)
 
-### Table: trials
+### Table: protocols
 | Column | Type | Description |
 |--------|------|-------------|
 | id | INTEGER | Primary key |
-| nct_id | TEXT | ClinicalTrials.gov ID (e.g., NCT00000001) |
-| title | TEXT | Trial title |
-| status | TEXT | Trial status (RECRUITING, COMPLETED, etc.) |
-| conditions | TEXT | JSON array of conditions |
-| interventions | TEXT | JSON array of interventions |
-| sponsor | TEXT | Lead sponsor |
-| created_at | DATETIME | When first indexed |
-| updated_at | DATETIME | Last update |
+| filename | TEXT | Original uploaded filename |
+| file_path | TEXT | Path to stored file |
+| file_hash | TEXT | SHA256 for deduplication |
+| uploaded_at | DATETIME | Upload timestamp |
+| section_3_text | TEXT | Extracted Section 3 content |
 
-### Table: documents
+### Table: reviews
 | Column | Type | Description |
 |--------|------|-------------|
 | id | INTEGER | Primary key |
-| trial_id | INTEGER | FK to trials |
-| nct_id | TEXT | Copy for convenience |
-| doc_type | TEXT | "protocol", "results", "protocol_sap", etc. |
-| file_path | TEXT | Path to PDF in /data/ |
-| file_hash | TEXT | SHA256 of PDF (for deduplication) |
-| page_count | INTEGER | Number of pages |
-| raw_text | TEXT | Extracted text (may be truncated for very large docs) |
-| embedding | BLOB | Vector embedding (JSON serialized, stored as binary) |
-| ingested_at | DATETIME | When docling ran |
-| updated_at | DATETIME | Last update |
+| protocol_id | INTEGER | FK to protocols |
+| overall_rating | TEXT | High / Medium / Low |
+| recommendation | TEXT | Approvable / Revisions needed / Major concerns |
+| estimand_score | INTEGER | X/4 ICH E9(R1) attributes |
+| endpoint | TEXT | ORR / PFS / OS / Other |
+| report_json | TEXT | Full structured report (JSON) |
+| created_at | DATETIME | Analysis timestamp |
 
-### Indexes
-- `trials.nct_id` (UNIQUE)
-- `documents.trial_id`
-- `documents.nct_id`
-- `documents.file_hash` (for deduplication)
+### Table: reference_docs
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Primary key |
+| title | TEXT | Document title |
+| doc_type | TEXT | guidance / approval_package / competitor |
+| url | TEXT | Source URL |
+| content_text | TEXT | Extracted text for RAG |
+| added_at | DATETIME | When indexed |
 
 ## API Endpoints
 
@@ -116,139 +112,211 @@ Health check.
 
 **Response:** `{"status": "ok"}`
 
-### GET /api/stats
-Return index statistics.
+### POST /api/upload
+Upload a protocol document for review.
+
+**Request:** multipart/form-data
+- `file`: PDF or DOCX file
 
 **Response:**
 ```json
 {
-  "trials_indexed": 150,
-  "documents_indexed": 423,
-  "documents_with_embeddings": 400,
-  "storage_mb": 125.5
+  "protocol_id": 1,
+  "filename": "protocol.pdf",
+  "section_3_extracted": true,
+  "section_3_length": 2500
 }
 ```
 
-### GET /api/search
-Search documents.
+### POST /api/review
+Generate regulatory review for uploaded protocol.
 
-**Query Parameters:**
-- `q` (string, required): Search query
-- `limit` (int, default 20): Max results
-- `offset` (int, default 0): Pagination offset
-- `method` (string, default "hybrid"): "keyword", "semantic", or "hybrid"
-
-**Response:**
+**Request:**
 ```json
 {
-  "results": [
-    {
-      "id": 1,
-      "nct_id": "NCT00000001",
-      "title": "Trial Title",
-      "doc_type": "results",
-      "snippet": "...matching text with <mark>highlights</mark>...",
-      "score": 0.85,
-      "rank": 1
-    }
-  ],
-  "total": 150,
-  "query": "diabetes treatment",
-  "method": "hybrid"
+  "protocol_id": 1,
+  "llm_provider": "openai"  // or "anthropic"
 }
 ```
 
-### GET /api/docs/{nct_id}
-Get document details and full text.
+**Response:**
+```json
+{
+  "review_id": 1,
+  "status": "completed",
+  "overall_rating": "Medium",
+  "recommendation": "Revisions needed",
+  "estimand_score": "3/4",
+  "report": {
+    "executive_summary": { ... },
+    "estimand_assessment": { ... },
+    "endpoint_assessment": { ... },
+    "competitive_comparison": { ... },
+    "consistency_flags": { ... },
+    "detailed_findings": [ ... ],
+    "recommended_actions": [ ... }
+  }
+}
+```
+
+### GET /api/reports
+List all reviews.
 
 **Response:**
 ```json
 {
-  "nct_id": "NCT00000001",
-  "title": "Trial Title",
-  "status": "COMPLETED",
-  "documents": [
+  "reviews": [
     {
       "id": 1,
-      "doc_type": "results",
-      "file_path": "/data/NCT00000001_results.pdf",
-      "page_count": 45,
-      "text_length": 12500
+      "protocol_id": 1,
+      "filename": "protocol.pdf",
+      "overall_rating": "Medium",
+      "recommendation": "Revisions needed",
+      "created_at": "2026-03-05T10:30:00"
     }
   ]
 }
 ```
 
-### GET /api/docs/{nct_id}/text/{doc_id}
-Get extracted text for a specific document.
+### GET /api/reports/{review_id}
+Get full review report.
 
-**Response:** Plain text or JSON depending on Accept header.
+## Output Format (Per SPEC.md)
 
-### POST /api/crawl
-Trigger a new crawl (or could be CLI-only for POC).
+The system generates structured reports matching this format:
 
-**Request:**
-```json
+```
+SECTION 3 REGULATORY REVIEW REPORT
+====================================
+
+1. EXECUTIVE SUMMARY
+   - Overall risk rating (High / Medium / Low)
+   - Top 3 findings
+   - Recommendation: Approvable as-is / Revisions needed / Major concerns
+
+2. ESTIMAND COMPLETENESS ASSESSMENT
+   - Population: [Defined / Partially Defined / Missing] — Detail
+   - Variable: [Defined / Partially Defined / Missing] — Detail
+   - Intercurrent Events: [Defined / Partially Defined / Missing] — Detail
+   - Population-Level Summary: [Defined / Partially Defined / Missing] — Detail
+   - ICH E9(R1) Compliance Score: [X/4 attributes fully defined]
+
+3. ENDPOINT APPROVABILITY ASSESSMENT
+   - Primary endpoint identified: [ORR / PFS / OS / Other]
+   - Approval pathway implied: [Accelerated / Traditional / Unclear]
+   - Regulatory precedent: [Strong / Moderate / Weak / None]
+   - Key risk: [Description of primary concern]
+
+4. COMPETITIVE BENCHMARK COMPARISON
+   Table comparing this protocol's endpoint choice, assessment method,
+   and estimand structure vs. 2-3 closest competitor programs
+
+5. INTERNAL CONSISTENCY FLAGS
+   - Section 3 vs. Section 10 (Statistical Plan) alignment
+   - Section 3 vs. Section 4 (Trial Design) alignment
+   - Section 3 vs. Section 5 (Population) alignment
+
+6. DETAILED FINDINGS
+   - Finding 1: [Description] | Risk: [H/M/L] | Recommendation
+   - Finding 2: [Description] | Risk: [H/M/L] | Recommendation
+
+7. RECOMMENDED ACTIONS
+   - Prioritized list of revisions before agency submission
+```
+
+## LLM Integration
+
+### Prompt Architecture
+
+**SYSTEM PROMPT:**
+```
+You are a VP of Regulatory Affairs reviewing a clinical trial protocol.
+Your task is to evaluate Section 3 (Trial Objectives and Estimands)
+against the ICH E9(R1) estimand framework and FDA/EMA regulatory
+precedent for oncology programs.
+
+Reference Documents:
+- ICH E9(R1) framework (4 attributes: Population, Variable, Intercurrent Events, Summary)
+- FDA guidance on clinical trial endpoints for cancer
+- Sotorasib (CodeBreaK 100/200) approval package
+- Adagrasib (KRYSTAL-1) approval package
+- KRAS G12C/G12D competitive landscape data
+```
+
+**USER PROMPT:**
+```
+Review the following Section 3 protocol text and generate a structured
+regulatory review report.
+
+[SECTION_3_TEXT]
+
+Provide your analysis in the following JSON format:
 {
-  "limit": 10,
-  "conditions": ["Diabetes"]
+  "executive_summary": { ... },
+  "estimand_assessment": { ... },
+  "endpoint_assessment": { ... },
+  "competitive_comparison": [ ... ],
+  "consistency_flags": { ... },
+  "detailed_findings": [ ... ],
+  "recommended_actions": [ ... ]
 }
 ```
 
-**Response:**
-```json
-{
-  "status": "started",
-  "trials_found": 10,
-  "new_pdfs": 8
-}
-```
+### LLM Providers
+- **OpenAI** (GPT-4o): Default provider
+- **Anthropic** (Claude 3.5 Sonnet): Alternative
+- Configurable via `.env`
 
-## Search Implementation
+## Reference Documents (RAG Sources)
 
-### Hybrid Search Ranking
+### Tier 1: Core Regulatory Guidance
+- ICH E9(R1) — Estimands and Sensitivity Analysis
+- FDA Adoption of ICH E9(R1) (May 2021)
+- EMA Adoption of ICH E9(R1)
+- FDA Guidance: Clinical Trial Endpoints for Cancer Drugs (Dec 2018)
+- FDA Draft Guidance: Accelerated Approval Considerations (March 2023)
+- FDA Project Endpoint
 
-1. **Keyword search**: SQLite FTS5 full-text search on `raw_text`
-2. **Semantic search**: Cosine similarity between query embedding and document embedding
-3. **Hybrid scoring**:
-   - Normalize both scores to 0-1
-   - Weight: 50% keyword, 50% semantic (configurable)
-   - Combine and rank
+### Tier 2: Competitor Approval Packages
+- Sotorasib (Lumakras) Multi-Discipline Review (NDA 214665)
+- Sotorasib Accelerated Approval (May 2021)
+- Adagrasib (Krazati) Multi-Discipline Review (NDA 216340)
+- Adagrasib Accelerated Approval (Dec 2022)
+- Sotorasib CRL context (Dec 2025)
 
-### Embedding Generation
-
-- Model: Configurable via `.env` (default: `sentence-transformers/all-MiniLM-L6-v2`)
-- Input: Document title + first 2000 chars of extracted text (truncated for performance)
-- Storage: JSON array of floats serialized to binary SQLite blob
+### Tier 3: KRAS Competitor Landscape
+- Zoldonrasib (RMC-9805) — NCT06040541, 61% ORR
+- VS-7375 (GFH375) — NCT06500676, 52% ORR in PDAC
+- INCB161734 — Phase 1/2, 34% ORR in PDAC
 
 ## File Structure
 
 ```
 confydex/
-├── .env                       # Configuration (API keys, model, paths)
+├── .env                       # Configuration
 ├── .gitignore
 ├── PLAN.md
+├── SPEC.md                    # Stakeholder requirements
 ├── README.md
 ├── confydex.py               # Main CLI entry point
 ├── config.py                 # Load .env and provide config
 ├── db.py                     # SQLite database + models
 ├── requirements.txt           # Python dependencies
 ├── requirements-dev.txt      # Dev dependencies
-├── data/                     # Downloaded PDFs
-│   └── .gitkeep
 ├── backend/
 │   ├── __init__.py
 │   ├── main.py              # FastAPI app
 │   ├── routes/
 │   │   ├── __init__.py
-│   │   ├── search.py        # /api/search
-│   │   ├── docs.py          # /api/docs
-│   │   └── crawl.py         # /api/crawl
+│   │   ├── upload.py       # /api/upload
+│   │   ├── review.py       # /api/review
+│   │   └── reports.py      # /api/reports
 │   └── services/
 │       ├── __init__.py
-│       ├── crawler.py       # clinicaltrials.gov API client
-│       ├── docling_ingest.py # PDF parsing
-│       └── embed.py         # Embedding generation
+│       ├── file_parser.py  # PDF/DOCX extraction
+│       ├── section_extractor.py # Isolate Section 3
+│       ├── llm_analyzer.py # LLM prompt + response parsing
+│       └── reference_docs.py # RAG document management
 ├── frontend/
 │   ├── package.json
 │   ├── vite.config.ts
@@ -258,44 +326,40 @@ confydex/
 │   │   ├── App.tsx
 │   │   ├── api.ts
 │   │   ├── components/
-│   │   │   ├── SearchBar.tsx
-│   │   │   ├── ResultsList.tsx
-│   │   │   └── DocPreview.tsx
+│   │   │   ├── FileUpload.tsx
+│   │   │   ├── ReviewReport.tsx
+│   │   │   ├── EstimandScorecard.tsx
+│   │   │   └── CompetitiveTable.tsx
 │   │   └── styles/
 │   │       └── index.css
 │   └── tsconfig.json
 └── tests/
     ├── __init__.py
-    ├── test_crawler.py
-    └── test_search.py
+    ├── test_parser.py
+    └── test_analyzer.py
 ```
 
 ## Configuration (.env)
 
 ```bash
-# Database
-DATABASE_URL=confydex.db
+# LLM Provider
+LLM_PROVIDER=openai  # or "anthropic"
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
 
-# Data storage
-DATA_DIR=./data
+# Model selection
+OPENAI_MODEL=gpt-4o
+ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 
-# Embedding model (sentence-transformers)
-EMBEDDING_MODEL=all-MiniLM-L6-v2
-EMBEDDING_DEVICE=cpu
-
-# Clinicaltrials.gov API (if needed)
-# CLINICALTRIALS_API_KEY=
+# File storage
+UPLOAD_DIR=./uploads
 
 # FastAPI
 API_HOST=0.0.0.0
 API_PORT=8000
 
-# Frontend (dev only, served via Vite)
+# Frontend (dev only)
 FRONTEND_PORT=5173
-
-# Search weights (0.0 to 1.0)
-KEYWORD_WEIGHT=0.5
-SEMANTIC_WEIGHT=0.5
 ```
 
 ## Dependencies
@@ -305,12 +369,14 @@ SEMANTIC_WEIGHT=0.5
 fastapi
 uvicorn
 httpx
-docling
+python-docx        # DOCX parsing
+pypdf              # PDF parsing
+pydantic
 sqlalchemy
-sqlite-vector  # or just store embeddings in blob
-sentence-transformers
 python-dotenv
-tiktoken  # for chunking if needed
+openai             # LLM client
+anthropic          # LLM client
+tiktoken           # for chunking if needed
 ```
 
 ### Frontend (frontend/package.json)
@@ -319,36 +385,35 @@ react
 react-dom
 axios
 tailwindcss
-@tanstack/react-query  # optional, for data fetching
+@tanstack/react-query
 ```
 
 ## Development Workflow
 
 1. **Init**: `python confydex.py init` - Create database tables
-2. **Crawl**: `python confydex.py crawl --limit 50` - Get first batch of PDFs
-3. **Ingest**: `python confydex.py ingest` - Extract text with docling
-4. **Embed**: `python confydex.py embed` - Generate vectors
-5. **Serve**: `python confydex.py serve` - Full stack dev server
-
-## Future Considerations (Out of Scope for POC)
-
-- Full-text search with Elasticsearch/OpenSearch
-- Dedicated vector database (Weaviate, Qdrant)
-- Background job queue (Celery) for crawling/ingestion
-- User authentication
-- Saved searches / bookmarks
-- PDF streaming / pagination for large documents
-- More sophisticated text chunking for embeddings
-- Multiple embedding models for comparison
+2. **Load references**: `python confydex.py load-refs` - Index regulatory documents
+3. **Upload protocol**: `python confydex.py review --file protocol.pdf` - Test analysis
+4. **Serve**: `python confydex.py serve` - Full stack dev server
 
 ## Success Criteria
 
-- [ ] Can crawl clinicaltrials.gov and download PDFs
-- [ ] Can extract text from PDFs using docling
-- [ ] Can generate vector embeddings for documents
-- [ ] Can search with keyword matching
-- [ ] Can search with semantic/vector similarity
-- [ ] Can combine both in hybrid ranking
-- [ ] Frontend can display search results
-- [ ] Frontend can preview document text
+- [ ] Can upload PDF and DOCX protocol files
+- [ ] Correctly extracts Section 3 content
+- [ ] LLM identifies 4 estimand attributes (present/missing)
+- [ ] Flags endpoint regulatory precedent with specific references
+- [ ] Generates structured report matching SPEC.md format
+- [ ] End-to-end demo runs in under 60 seconds
 
+## Future Considerations (Out of Scope for POC)
+
+- Support for full protocol analysis (Sections 4, 5, 10)
+- Multiple LLM provider comparison
+- Reference document vector store for RAG
+- Batch review capabilities
+- Export to PDF/Word
+- Collaboration features (comments, revisions)
+- Integration with regulatory submission systems
+
+---
+
+*Last Updated: March 2026*
