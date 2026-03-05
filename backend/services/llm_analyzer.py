@@ -175,7 +175,7 @@ IMPORTANT: Return ONLY valid JSON, no additional text."""
             )
         
         content = response.choices[0].message.content
-        return json.loads(content)
+        return self._parse_json_response(content)
     
     def _analyze_anthropic(self, user_prompt: str) -> Dict[str, Any]:
         """Analyze using Anthropic."""
@@ -189,7 +189,33 @@ IMPORTANT: Return ONLY valid JSON, no additional text."""
         )
         
         content = message.content[0].text
-        return json.loads(content)
+        return self._parse_json_response(content)
+    
+    def _parse_json_response(self, content: str) -> Dict[str, Any]:
+        """Parse JSON response, handling edge cases."""
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # Try to find JSON in the response
+            import re
+            # Look for JSON object
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                try:
+                    return json.loads(json_match.group(0))
+                except json.JSONDecodeError:
+                    pass
+            
+            # If still fails, return error structure
+            return {
+                "error": "Failed to parse LLM response",
+                "raw_content": content[:500],
+                "executive_summary": {
+                    "overall_rating": "Unknown",
+                    "top_3_findings": ["Failed to parse LLM response"],
+                    "recommendation": "Error"
+                }
+            }
     
     def extract_review_fields(self, report: Dict[str, Any]) -> Dict[str, Any]:
         """Extract key fields for the reviews table."""
