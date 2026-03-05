@@ -1,11 +1,11 @@
-# Confydex - AI-Powered Regulatory Review of Protocol Section 3
+# Confydex - AI-Powered Regulatory Review of Protocol Estimands
 
 ## Overview
 
 **Confydex** is a proof-of-concept web application that:
 1. Accepts uploaded clinical trial protocols (PDF/DOCX)
-2. Extracts Section 3 (Trial Objectives and Estimands)
-3. Analyzes against ICH E9(R1) framework using LLM
+2. Extracts all text and sends to LLM
+3. LLM finds and analyzes trial objectives & estimands
 4. Generates structured regulatory review report with risk ratings
 5. Compares against competitor programs (KRAS G12C/G12D landscape)
 
@@ -30,23 +30,24 @@
 │  /api/upload   - Upload protocol                                │
 │  /api/review   - Generate regulatory review                     │
 │  /api/reports  - List historical reviews                        │
-│  /api/health   - Health check                                    │
+│  /api/health   - Health check                                   │
 └─────────────────────────────┬───────────────────────────────────┘
                                │
           ┌────────────────────┼────────────────────┐
           ▼                    ▼                    ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  File Handler   │  │  LLM Analyzer   │  │  Reference      │
-│  (PDF/DOCX)     │  │  (OpenAI/       │  │  Documents      │
-│  → Section 3    │  │   Anthropic)    │  │  (Regulatory    │
-│    extraction   │  │  → ICH E9(R1)   │  │    precedents)  │
-│                 │  │    analysis     │  │                 │
+│  File Parser    │  │  LLM Analyzer   │  │                │
+│  (PDF/DOCX)     │  │  (OpenAI/       │  │   (Future:     │
+│  → Full text    │  │   OpenCode Go)  │  │   RAG refs)    │
+│    extraction   │  │  → Finds       │  │                │
+│                 │  │    estimands   │  │                │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
-          │                    │                    │
-          ▼                    ▼                    ▼
+          │                    │
+          ▼                    ▼
 ┌───────────────────────────────────────────────────────────────┐
 │                    SQLite Database                             │
-│    protocols | reviews | reference_docs                       │
+│    protocols | reviews                                       │
+│    (metadata only - no full text stored)                     │
 └───────────────────────────────────────────────────────────────┘
 ```
 
